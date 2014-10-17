@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<Forms>
+    <Form Class="Window" LAnchorPoint="0" LAnchorOffset="202" TAnchorPoint="1" TAnchorOffset="-78" RAnchorPoint="0" RAnchorOffset="328" BAnchorPoint="1" BAnchorOffset="-31" RelativeToClient="1" Font="Default" Text="" BGColor="white" TextColor="white" Template="Default" TooltipType="OnCursor" Name="ButtonOverlay" Border="0" Picture="0" SwallowMouseClicks="1" Moveable="0" Escapable="0" Overlapped="0" TooltipColor="" Sprite="BK3:UI_BK3_Metal_Inset_SharpCorner" DT_CENTER="1" DT_BOTTOM="0" DT_VCENTER="1" IgnoreMouse="1" Tooltip="">
+        <Control Class="Button" Base="CRB_Basekit:kitBtn_Metal_LargeBlue" Font="DefaultButton" ButtonType="PushButton" RadioGroup="" LAnchorPoint="0" LAnchorOffset="0" TAnchorPoint="0" TAnchorOffset="0" RAnchorPoint="1" RAnchorOffset="0" BAnchorPoint="1" BAnchorOffset="0" DT_VCENTER="1" DT_CENTER="1" BGColor="white" TextColor="white" NormalTextColor="UI_BtnTextBlueNormal" PressedTextColor="UI_BtnTextBluePressed" FlybyTextColor="UI_BtnTextBlueFlyby" PressedFlybyTextColor="UI_BtnTextBluePressedFlyby" DisabledTextColor="UI_BtnTextBlueDisabled" TooltipType="OnCursor" Name="GrabAttachmentsButton" TooltipColor="" Picture="0" Border="0" Text="[PLACEHOLDER]" TextId="" TestAlpha="1" Tooltip="" NoClip="1" WindowSoundTemplate="MetalButtonLarge">
+            <Event Name="ButtonSignal" Function="OnGrabAttachmentsBtn"/>
+        </Control>
+    </Form>
+</Forms>

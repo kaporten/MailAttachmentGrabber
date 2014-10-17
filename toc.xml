@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Addon Author="Luak" APIVersion="9" Name="MailAttachmentGrabber" Description="">
+	<Script Name="Libs/GeminiLocale-1.0/GeminiLocale.lua"/>
+	<Script Name="locale/enUS.lua"/>
+	<Script Name="locale/deDE.lua"/>
+	<Script Name="locale/frFR.lua"/>
+    <Script Name="MailAttachmentGrabber.lua"/>
+    <Form Name="MailAttachmentGrabber.xml"/>
+</Addon>
