@@ -64,37 +64,40 @@ function MailAttachmentGrabber:MailUpdateAllListItemsIntercept()
 	-- Allow Mail.OnUpdateAllListItemsIntercept to complete as usual
 	MailAttachmentGrabber.mailUpdateAllListItems(Mail)
 
-	-- Then update our overlay button text
+	-- Update and store list of selected mail IDs and attachment-summary for these mails
+	MailAttachmentGrabber.tMailIdList = MailAttachmentGrabber:GetSelectedMailIds()
+	MailAttachmentGrabber.tAttachmentsList = MailAttachmentGrabber:GetAttachments()
+	
+	-- Update the overlay button text
 	MailAttachmentGrabber:UpdateButton()
+	MailAttachmentGrabber:UpdateTooltip()
 end
 
 -- Called whenever the button text should be recalculated
 function MailAttachmentGrabber:UpdateButton()
 	-- Intercepted function UpdateButton may be called at times when my overlay is not present yet
-	if self.wndOverlay == nil then return end
-
+	if self.wndOverlay == nil then return end	
+	
 	-- Locate overlay button
 	local btn = self.wndOverlay:FindChild("GrabAttachmentsButton")
 	
 	-- Default text is "Take All"
 	local text = L["TakeAll"]
-	local Mail = Apollo.GetAddon("Mail")
-
+	
 	-- If any mails are selected (even if all are selected), update text from "All" to "Selected"
-	local selectedIds = MailAttachmentGrabber:GetSelectedMailIds()
-	if #selectedIds > 0 then
+	if self.tMailIdList ~= nil and #self.tMailIdList > 0 then
 		text = L["TakeSelected"]
 	end
 	
-	--local hasAttachments = MailAttachmentGrabber:HasAttachments(selectedIds)
-	local tAttachments = MailAttachmentGrabber:GetAttachments(selectedIds)
-	MailAttachmentGrabber.tAttachments = tAttachments
-	btn:Enable(tAttachments ~= nil and #tAttachments > 0)
-	
+	-- Set button text	
 	btn:SetText(text)
+
+	-- Enable or disable, depending on attachments to grab
+	btn:Enable(self.tAttachmentsList ~= nil and #self.tAttachmentsList > 0)
 end
 
 -- Scans the Mail GUI for selected mail indices. Returns list containing selected mail id-strings.
+-- Empty list returned = no mails are selected
 function MailAttachmentGrabber:GetSelectedMailIds()	
 	local Mail = Apollo.GetAddon("Mail")
 	local selectedIds = {}
@@ -109,28 +112,28 @@ end
 
 -- Returns true if any of the selected mail-indices has attachments. 
 -- If selectedIds input is empty, returns true if ANY mail has attachments.
-function MailAttachmentGrabber:GetAttachments(selectedIds)	
-	selectedIds = selectedIds or {}
+function MailAttachmentGrabber:GetAttachments()	
 	
-	-- Reverse list of selected indexes into map of selectedId->true
-	local tIsSelected = {}	
-	for k,v in ipairs(selectedIds) do tIsSelected[v] = true end
+	-- Reverse list of selected ids into map of selectedId->true
+	local tIsIdSelected = {}	
+	for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
 	
-	
+	-- Scan all selected (or just all, if none are selected) mails, and build cummulitative list of attachments
 	local tAttachments = {}
 	local Mail = Apollo.GetAddon("Mail")	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
-		if #selectedIds == 0 or tIsSelected[mail:GetIdStr()] == true then
+		if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
+			-- Mail is selected (or none are selected). Include in summary if it has attachments and is not COD.			
+			local isCOD = not mail:GetMessageInfo().monCod:IsZero()			
 			local tMsgAttachments = mail:GetMessageInfo().arAttachments
-			if tMsgAttachments ~= nil and #tMsgAttachments > 0 then
+			if isCOD == false and tMsgAttachments ~= nil and #tMsgAttachments > 0 then				
+			
 				for _,msgAttachment in pairs(tMsgAttachments) do
 					if tAttachments[msgAttachment.itemAttached:GetItemId()] ~= nil then
-						-- Attachment type already seen, just add stackcount
-						--Print("New attachment")
+						-- Attachment type already seen, just add stackcount						
 						tAttachments[msgAttachment.itemAttached:GetItemId()].nStackCount = tAttachments[msgAttachment.itemAttached:GetItemId()].nStackCount + msgAttachment.nStackCount
 					else
 						--Print("More of existing attachment")	
-						-- Attachment type not seen before, add to tAttachment array
 						local newAttachmentType = {}
 						newAttachmentType.itemAttached = msgAttachment.itemAttached
 						newAttachmentType.nStackCount = msgAttachment.nStackCount						
@@ -151,24 +154,45 @@ function MailAttachmentGrabber:GetAttachments(selectedIds)
 end
 
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
+	-- TODO: Actually grab stuff ...
 	Print(self.wndOverlay:FindChild("GrabAttachmentsButton"):GetText())
 	
+	-- Reverse list of selected ids into map of selectedId->true
+	local tIsIdSelected = {}	
+	for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
 	
+	local Mail = Apollo.GetAddon("Mail")
+	
+	local inbox = MailSystemLib.GetInbox()
+	for _,mail in pairs(MailSystemLib.GetInbox()) do
+		if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
+			local isCOD = not mail:GetMessageInfo().monCod:IsZero()			
+			local tMsgAttachments = mail:GetMessageInfo().arAttachments
+			if isCOD == false and tMsgAttachments ~= nil and #tMsgAttachments > 0 then				
+				-- Mail is eligible for grabbing!
+				mail:MarkAsRead()
+				mail:TakeAllAttachments()
+				Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
+			end
+		end
+	end
 end
 
-MailAttachmentGrabber = MailAttachmentGrabber:new()
-MailAttachmentGrabber:Init()
+-- First-time generation of tooltip window
+function MailAttachmentGrabber:OnGenerateTooltip(wndHandler, wndControl, eToolTipType, x, y)	
+	self.wndTooltip = wndControl:LoadTooltipForm("MailAttachmentGrabber.xml", "TooltipForm")
+end
 
----------------------------------------------------------------------------------------------------
--- ButtonOverlay Functions
----------------------------------------------------------------------------------------------------
-function MailAttachmentGrabber:OnGenerateTooltip(wndHandler, wndControl, eToolTipType, x, y)
-	local wndTooltip = wndControl:LoadTooltipForm("MailAttachmentGrabber.xml", "TooltipForm")
+function MailAttachmentGrabber:UpdateTooltip()
+	if self.wndTooltip == nil then return end
+	
+	-- Used to determine width of tooltip window
+	local maxLineWidth = 0
 	
 	-- Add individual item-lines to tooltip
-	local maxLineWidth = 0
-	for _,attachment in ipairs(self.tAttachments) do
-		local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipLineForm", wndTooltip, MailAttachmentGrabber)
+	self.wndTooltip:DestroyChildren()
+	for _,attachment in ipairs(self.tAttachmentsList) do
+		local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipLineForm", self.wndTooltip, MailAttachmentGrabber)
 		wndLine:FindChild("ItemIcon"):SetSprite(attachment.itemAttached:GetIcon())
 		
 		local str = attachment.itemAttached:GetName() .. " (x" .. attachment.nStackCount .. ")"
@@ -179,13 +203,15 @@ function MailAttachmentGrabber:OnGenerateTooltip(wndHandler, wndControl, eToolTi
 		if nCurrLineWidth > maxLineWidth then maxLineWidth = nCurrLineWidth end
 	end
 	
-	-- Sort according to name
-	wndTooltip:ArrangeChildrenVert(0, 
+	-- Sort lines according to name
+	self.wndTooltip:ArrangeChildrenVert(0, 
 		function(a, b) 
 			return a:FindChild("ItemName"):GetText() < b:FindChild("ItemName"):GetText()
 		end)
 	
 	-- Resize window width and height. Gief moar magic numbers plox!
-	wndTooltip:SetAnchorOffsets(0, 0, maxLineWidth+80, 18+#self.tAttachments*24)
+	self.wndTooltip:SetAnchorOffsets(0, 0, maxLineWidth+80, 18+#self.tAttachmentsList*24)
 end
 
+MailAttachmentGrabber = MailAttachmentGrabber:new()
+MailAttachmentGrabber:Init()
