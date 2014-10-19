@@ -32,9 +32,9 @@ end
 function MailAttachmentGrabber:OnDocLoaded()
 	local Mail = Apollo.GetAddon("Mail")
 	
-	-- Hook Mail.OnDocumentReady so overlay can be loaded
-	self.mailOnDocumentReady = Mail.OnDocumentReady
-	Mail.OnDocumentReady = self.MailOnDocumentReadyIntercept
+	-- Hook Mail.ToggleWindow so overlay can be loaded / button updated
+	self.mailToggleWindow = Mail.ToggleWindow 
+	Mail.ToggleWindow = self.MailToggleWindowIntercept
 	
 	-- Hook Mail.UpdateAllListItems so button text can be updated on mail select/deselect
 	self.mailUpdateAllListItems = Mail.UpdateAllListItems
@@ -42,18 +42,26 @@ function MailAttachmentGrabber:OnDocLoaded()
 end
 
 -- Intercept Mail-addons "OnDocumentReady" so that my own overlay can be added to the window
-function MailAttachmentGrabber:MailOnDocumentReadyIntercept()
+function MailAttachmentGrabber:MailToggleWindowIntercept()
 	local Mail = Apollo.GetAddon("Mail")
+
+	-- If Mail is not yet fully initialized, or being closed, do nothing
+	if Mail.wndMain == nil or Mail.wndMain:FindChild("MailForm") == nil or Mail.wndMain:IsVisible() then 
+		MailAttachmentGrabber.mailToggleWindow(Mail)
+		return 
+	end
 	
-	-- Allow Mail.OnDocumentReady to complete as usual
-	MailAttachmentGrabber.mailOnDocumentReady(Mail)
-	
-	-- Then load overlay form
-	local wndOverlayParent = Mail.wndMain:FindChild("MailForm")
-	MailAttachmentGrabber.wndOverlay = Apollo.LoadForm(MailAttachmentGrabber.xmlDoc, "ButtonOverlay", wndOverlayParent, MailAttachmentGrabber)
-	
+	-- Load overlay form, if not already done
+	if MailAttachmentGrabber.wndOverlay == nil then
+		local wndOverlayParent = Mail.wndMain:FindChild("MailForm")
+		MailAttachmentGrabber.wndOverlay = Apollo.LoadForm(MailAttachmentGrabber.xmlDoc, "ButtonOverlay", wndOverlayParent, MailAttachmentGrabber)
+	end
+		
 	-- Set correct button text
 	MailAttachmentGrabber:UpdateButton()
+	
+	-- Allow Mail.ToggleWindow to complete as usual
+	MailAttachmentGrabber.mailToggleWindow(Mail)
 end
 
 -- Intercept Mail-addons "UpdateAllListItems" (which is called whenever anything has changed/needs updating)
