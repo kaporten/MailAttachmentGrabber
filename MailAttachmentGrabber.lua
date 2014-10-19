@@ -128,25 +128,36 @@ function MailAttachmentGrabber:GetAttachments()
 	
 	-- Scan all selected (or just all, if none are selected) mails, and build cummulitative list of attachments
 	local tAttachments = {}
+
 	local Mail = Apollo.GetAddon("Mail")	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
 			-- Mail is selected (or none are selected). Include in summary if it has attachments and is not COD.			
-			local isCOD = not mail:GetMessageInfo().monCod:IsZero()			
 			local tMsgAttachments = mail:GetMessageInfo().arAttachments
-			if isCOD == false and tMsgAttachments ~= nil and #tMsgAttachments > 0 then				
+			local bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
+			local bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
+			local bIsGift = not mail:GetMessageInfo().monGift:IsZero()			
 			
+			if (not bIsCOD) and (bIsGift or bHasAttachments) then			
+				-- Add attachments summary 
 				for _,msgAttachment in pairs(tMsgAttachments) do
 					if tAttachments[msgAttachment.itemAttached:GetItemId()] ~= nil then
 						-- Attachment type already seen, just add stackcount						
 						tAttachments[msgAttachment.itemAttached:GetItemId()].nStackCount = tAttachments[msgAttachment.itemAttached:GetItemId()].nStackCount + msgAttachment.nStackCount
 					else
-						--Print("More of existing attachment")	
 						local newAttachmentType = {}
 						newAttachmentType.itemAttached = msgAttachment.itemAttached
 						newAttachmentType.nStackCount = msgAttachment.nStackCount						
 						tAttachments[msgAttachment.itemAttached:GetItemId()] = newAttachmentType
 					end
+				end
+				
+				-- Add cash summary
+				if bIsGift then
+					if type(tAttachments["Cash"]) ~= "number" then 
+						tAttachments["Cash"] = 0 
+					end
+					tAttachments["Cash"] = tAttachments["Cash"] + mail:GetMessageInfo().monGift:GetAmount()
 				end
 			end
 		end
@@ -162,25 +173,41 @@ function MailAttachmentGrabber:GetAttachments()
 end
 
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
+	if self.bGrabInProgress == true then return end
+
 	-- Reverse list of selected ids into map of selectedId->true
+	self.bGrabInProgress = true
+		
 	local tIsIdSelected = {}	
 	for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
 	
-	local Mail = Apollo.GetAddon("Mail")
-	
-	local inbox = MailSystemLib.GetInbox()
+	local Mail = Apollo.GetAddon("Mail")	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
-			local isCOD = not mail:GetMessageInfo().monCod:IsZero()			
+			-- Mail is selected (or none are selected). Include in summary if it has attachments and is not COD.			
 			local tMsgAttachments = mail:GetMessageInfo().arAttachments
-			if isCOD == false and tMsgAttachments ~= nil and #tMsgAttachments > 0 then				
-				-- Mail is eligible for grabbing!
-				mail:MarkAsRead()
-				mail:TakeAllAttachments()
-				Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
+			local bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
+			local bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
+			local bIsGift = not mail:GetMessageInfo().monGift:IsZero()			
+			
+			-- Safeguard against COD even though such mails should never be on this list to begin with
+			if not bIsCOD then 
+				if bIsGift then
+					mail:TakeMoney()
+				end
+				
+				if bHasAttachments then
+					mail:TakeAllAttachments()
+				end
 			end
+				
+			-- Mark as read and select mail so it can be manually deleted later on
+			mail:MarkAsRead()			
+			Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
 		end
 	end
+	
+	self.bGrabInProgress = false
 end
 
 -- First-time generation of tooltip window
@@ -196,21 +223,29 @@ function MailAttachmentGrabber:UpdateTooltip()
 	
 	-- Add individual item-lines to tooltip
 	self.wndTooltip:DestroyChildren()
-	for _,attachment in ipairs(self.tAttachmentsList) do
-		local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipLineForm", self.wndTooltip, MailAttachmentGrabber)
-		wndLine:FindChild("ItemIcon"):SetSprite(attachment.itemAttached:GetIcon())
-		
-		local str = attachment.itemAttached:GetName() .. " (x" .. attachment.nStackCount .. ")"
-		wndLine:FindChild("ItemName"):SetText(str)
-		
-		-- Update max line width if this text is the longest added so far
-		local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", str)		
-		if nCurrLineWidth > maxLineWidth then maxLineWidth = nCurrLineWidth end
+	for _,attachment in pairs(self.tAttachmentsList) do
+		if type(attachment) == "number" then
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", self.wndTooltip, MailAttachmentGrabber)
+			wndLine:FindChild("CashWindow"):SetAmount(attachment, true)
+			if maxLineWidth < 100 then maxLineWidht = 150 end
+		else
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", self.wndTooltip, MailAttachmentGrabber)
+			wndLine:FindChild("ItemIcon"):SetSprite(attachment.itemAttached:GetIcon())
+			
+			local str = attachment.itemAttached:GetName() .. " (x" .. attachment.nStackCount .. ")"
+			wndLine:FindChild("ItemName"):SetText(str)
+			
+			-- Update max line width if this text is the longest added so far
+			local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", str)		
+			if nCurrLineWidth > maxLineWidth then maxLineWidth = nCurrLineWidth end
+		end
 	end
 	
 	-- Sort lines according to name
 	self.wndTooltip:ArrangeChildrenVert(0, 
-		function(a, b) 
+		function(a, b)
+			if a:GetName() == "TooltipCashLineForm" then return true end
+			if b:GetName() == "TooltipCashLineForm" then return false end
 			return a:FindChild("ItemName"):GetText() < b:FindChild("ItemName"):GetText()
 		end)
 	
