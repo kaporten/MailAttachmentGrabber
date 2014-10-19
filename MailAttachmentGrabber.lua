@@ -162,9 +162,6 @@ function MailAttachmentGrabber:GetAttachments()
 end
 
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
-	-- TODO: Actually grab stuff ...
-	Print(self.wndOverlay:FindChild("GrabAttachmentsButton"):GetText())
-	
 	-- Reverse list of selected ids into map of selectedId->true
 	local tIsIdSelected = {}	
 	for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
