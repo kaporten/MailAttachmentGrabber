@@ -174,39 +174,42 @@ end
 
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
 	if self.bGrabInProgress == true then return end
-
-	-- Reverse list of selected ids into map of selectedId->true
 	self.bGrabInProgress = true
-		
-	local tIsIdSelected = {}	
-	for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
-	
-	local Mail = Apollo.GetAddon("Mail")	
-	for _,mail in pairs(MailSystemLib.GetInbox()) do
-		if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
-			-- Mail is selected (or none are selected). Include in summary if it has attachments and is not COD.			
-			local tMsgAttachments = mail:GetMessageInfo().arAttachments
-			local bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
-			local bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
-			local bIsGift = not mail:GetMessageInfo().monGift:IsZero()			
+
+	pcall(
+		function()
+			-- Reverse list of selected ids into map of selectedId->true
+			local tIsIdSelected = {}	
+			for k,v in ipairs(self.tMailIdList) do tIsIdSelected[v] = true end
 			
-			-- Safeguard against COD even though such mails should never be on this list to begin with
-			if not bIsCOD then 
-				if bIsGift then
-					mail:TakeMoney()
-				end
-				
-				if bHasAttachments then
-					mail:TakeAllAttachments()
+			local Mail = Apollo.GetAddon("Mail")	
+			for _,mail in pairs(MailSystemLib.GetInbox()) do
+				if #self.tMailIdList == 0 or tIsIdSelected[mail:GetIdStr()] == true then
+					-- Mail is selected (or none are selected). Include in summary if it has attachments and is not COD.			
+					local tMsgAttachments = mail:GetMessageInfo().arAttachments
+					local bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
+					local bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
+					local bIsGift = not mail:GetMessageInfo().monGift:IsZero()			
+					
+					-- Safeguard against COD even though such mails should never be on this list to begin with
+					if not bIsCOD then 
+						if bIsGift then
+							mail:TakeMoney()
+						end
+						
+						if bHasAttachments then
+							mail:TakeAllAttachments()
+						end
+					end
+						
+					-- Mark as read and select mail so it can be manually deleted later on
+					mail:MarkAsRead()			
+					Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
 				end
 			end
-				
-			-- Mark as read and select mail so it can be manually deleted later on
-			mail:MarkAsRead()			
-			Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
 		end
-	end
-	
+	)
+		
 	self.bGrabInProgress = false
 end
 
