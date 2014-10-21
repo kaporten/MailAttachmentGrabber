@@ -47,10 +47,14 @@ function MailAttachmentGrabber:OnDocLoaded()
 	Mail.UpdateAllListItems = self.MailUpdateAllListItemsIntercept
 	
 	-- Load settings form and populate values
-	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, MailAttachmentGrabber)
+	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
 	self.wndSettings:Show(false, true)
 	self.wndSettings:FindChild("Slider"):SetValue(self.tConfig.nTimer)
 	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Delay (%.1fs):", self.tConfig.nTimer/1000))
+	
+	-- Load tooltip form
+	self.wndTooltip = Apollo.LoadForm(self.xmlDoc, "TooltipForm", nil, self)
+	self.wndTooltip:Show(false, true)
 end
 
 -- Intercept Mail-addons "OnDocumentReady" so that my own overlay can be added to the window
@@ -68,12 +72,16 @@ function MailAttachmentGrabber:MailToggleWindowIntercept()
 		local wndOverlayParent = Mail.wndMain:FindChild("MailForm")
 		MailAttachmentGrabber.wndOverlay = Apollo.LoadForm(MailAttachmentGrabber.xmlDoc, "ButtonOverlayForm", wndOverlayParent, MailAttachmentGrabber)
 	end
-		
-	-- Set correct button text
-	MailAttachmentGrabber:UpdateButton()
+	
+	-- Attach tooltip form
+	MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton"):SetTooltipForm(MailAttachmentGrabber.wndTooltip)
+	MailAttachmentGrabber.wndTooltip:Show(true)	
 	
 	-- Allow Mail.ToggleWindow to complete as usual
 	MailAttachmentGrabber.mailToggleWindow(Mail)
+	
+	-- Immediately fire an update event
+	MailAttachmentGrabber:MailUpdateAllListItemsIntercept()
 end
 
 -- Intercept Mail-addons "UpdateAllListItems" (which is called whenever anything has changed/needs updating)
@@ -87,9 +95,10 @@ function MailAttachmentGrabber:MailUpdateAllListItemsIntercept()
 	-- Update and store list of selected mail IDs and attachment-summary for these mails
 	MailAttachmentGrabber.tSelectedMailMap = MailAttachmentGrabber:GetSelectedMailMap()
 	MailAttachmentGrabber.tEligibleMailMap = MailAttachmentGrabber:GetEligibleMailMap()
-	MailAttachmentGrabber.tAttachmentsMap = MailAttachmentGrabber:GetAttachmentsMap()
+	MailAttachmentGrabber.tAttachmentsMap = MailAttachmentGrabber:GetAttachmentsMap(MailAttachmentGrabber.tEligibleMailMap)
+
 	
-	-- Update the overlay button text
+	-- Update the overlay button text & tooltip
 	MailAttachmentGrabber:UpdateButton()
 	MailAttachmentGrabber:UpdateTooltip()
 end
@@ -101,24 +110,28 @@ function MailAttachmentGrabber:UpdateButton()
 	
 	-- Locate overlay button
 	local btn = self.wndOverlay:FindChild("GrabAttachmentsButton")
-	
-	-- Default text is "Take All"
-	local text = L["TakeAll"]
-	
-	-- If any mails are selected (even if all are selected), update text from "All" to "Selected"
-	if self.tSelectedMailMap ~= nil and next(self.tSelectedMailMap) ~= nil then
-		text = L["TakeSelected"]
-	end
-	
+		
+	local text 
 	if self.bGrabInProgress then
-		text = "Grabbing!" -- TODO: Localize or replace with hamster
+		text = ""
+		self.wndOverlay:FindChild("Spinner"):Show(true)
+	else
+		self.wndOverlay:FindChild("Spinner"):Show(false)
+	
+		-- Default text is "Take All"
+		text = L["TakeAll"]
+		
+		-- If any mails are selected (even if all are selected), update text from "All" to "Selected"
+		if self.tSelectedMailMap ~= nil and next(self.tSelectedMailMap) ~= nil then
+			text = L["TakeSelected"]
+		end
+		
+		-- Enable or disable, depending on attachments to grab
+		btn:Enable(self.tAttachmentsMap ~= nil and next(self.tAttachmentsMap) ~= nil)		
 	end
 	
 	-- Set button text	
 	btn:SetText(text)
-
-	-- Enable or disable, depending on attachments to grab
-	btn:Enable(self.tAttachmentsMap ~= nil and next(self.tAttachmentsMap) ~= nil)
 end
 
 -- Scans the Mail GUI for selected mail indices. Returns list containing selected mail id-strings.
@@ -169,7 +182,7 @@ end
 
 -- Returns true if any of the selected mail-indices has attachments. 
 -- If selectedIds input is empty, returns true if ANY mail has attachments.
-function MailAttachmentGrabber:GetAttachmentsMap()
+function MailAttachmentGrabber:GetAttachmentsMap(tMails)
 	
 	-- List of attachments
 	local result = {}
@@ -177,7 +190,7 @@ function MailAttachmentGrabber:GetAttachmentsMap()
 	-- Build attachment-summary table for all eligible mails
 	local Mail = Apollo.GetAddon("Mail")	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
-		local tEligibleMail = self.tEligibleMailMap[mail:GetIdStr()]
+		local tEligibleMail = tMails[mail:GetIdStr()]
 		if tEligibleMail ~= nil then
 			-- Mail is eligible. Include in summary.
 			-- Add attachments summary 
@@ -210,23 +223,37 @@ function MailAttachmentGrabber:GetAttachmentsMap()
 end
 
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
-	-- Concurrency safeguard
-	if self.bGrabInProgress then return end
+	-- Click while grabbing is an interrupt-signal
+	if self.bGrabInProgress then 
+		self.bInterruptGrab = true
+		return 
+	end
 	
 	-- Indicate that grabbing is in progress to prevent futher buttonclicks from starting grabbing
 	self.bGrabInProgress = true
-
-	-- Call recursive-timer grabber function with a clone of the eligible-mail list
-	self.tMailsToProcess = {}
+	self.bInterruptGrab = false
+	
+	-- Store snapshots of eligible mails & attachment lists to use as basis for tooltip progress
+	self.tMailsToProcess = {} -- "todo-list" of mails to process. Will be reduced until empty.
+	self.tEligibleMailsSnapshot = {} -- Static snapshot of mails to process
+	self.tAttachmentsSnapshot = {} -- Static snapshot of attachments to process
+	
 	for k,v in pairs(self.tEligibleMailMap) do self.tMailsToProcess[k] = v end
+	for k,v in pairs(self.tEligibleMailMap) do self.tEligibleMailsSnapshot[k] = v end
+	for k,v in pairs(self.tAttachmentsMap) do self.tAttachmentsSnapshot[k] = v end
+	
+	-- Call recursive-timer grabber function with a clone of the eligible-mail and attachment maps
 	MailAttachmentGrabber:GrabAttachmentsForMail()
 end
 
 function MailAttachmentGrabber:GrabAttachmentsForMail()
+	-- Update mail gui (incl. my overlay buttons/tooltip)
+	self.MailUpdateAllListItemsIntercept()
 	
-	-- Recursion base
-	if self.tMailsToProcess == nil or next(self.tMailsToProcess) == nil then 
+	-- Recursion base / interrupt-signal terminates the loop
+	if self.bInterruptGrab or self.tMailsToProcess == nil or next(self.tMailsToProcess) == nil then 
 		self.bGrabInProgress = false
+		self.bInterruptGrab = false
 		return 
 	end
 	
@@ -258,14 +285,15 @@ function MailAttachmentGrabber:GrabAttachmentsForMail()
 			end
 		end
 	end
+
+	-- Recursion base / interrupt-signal terminates the loop
+	if self.bInterruptGrab or self.tMailsToProcess == nil or next(self.tMailsToProcess) == nil then 
+		self.bGrabInProgress = false
+		self.bInterruptGrab = false
+		return 
+	end
 	
 	self.nextMailTimer = ApolloTimer.Create(self.tConfig.nTimer/1000, false, "GrabAttachmentsForMail", self)
-end
-
-
--- First-time generation of tooltip window
-function MailAttachmentGrabber:OnGenerateTooltip(wndHandler, wndControl, eToolTipType, x, y)	
-	self.wndTooltip = wndControl:LoadTooltipForm("MailAttachmentGrabber.xml", "TooltipForm")
 end
 
 function MailAttachmentGrabber:UpdateTooltip()
@@ -277,17 +305,55 @@ function MailAttachmentGrabber:UpdateTooltip()
 	-- Add individual item-lines to tooltip
 	self.wndTooltip:DestroyChildren()
 	local attachmentCount = 0
-	for key,attachment in pairs(self.tAttachmentsMap) do
+	
+	-- Loop over all *original* attachment types, but get the count from the *current* set, to show a sense of progress on the tooltip
+	-- When grabbing is not in progress, the "master set" is the just-before-grabbing clone
+	local tMasterAttachmentMap, tMasterMailMap
+	if self.bGrabInProgress then
+		tMasterMailMap = self.tEligibleMailsSnapshot
+		tMasterAttachmentMap = self.tAttachmentsSnapshot		
+	else
+		tMasterMailMap = self.tEligibleMailMap
+		tMasterAttachmentMap = self.tAttachmentsMap
+	end
+	
+	-- Completely hide tooltip if there is no work to do
+	if next(tMasterAttachmentMap) == nil then
+		self.wndTooltip:Show(false)
+		return
+	else
+		self.wndTooltip:Show(true)
+	end
+	
+	-- Get attachments left for the original mail-selection
+	local tCurrentAttachments = self:GetAttachmentsMap(tMasterMailMap)
+	
+	for key,attachmentBeforeGrab in pairs(tMasterAttachmentMap) do
+		local currentAttachment = tCurrentAttachments[key]
 		attachmentCount = attachmentCount + 1
 		if key == "Cash" then
 			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", self.wndTooltip, MailAttachmentGrabber)
-			wndLine:FindChild("CashWindow"):SetAmount(attachment, true)
+			
+			-- All cash attachments may have been grabbed already, so "active" set is empty now
+			local amt = 0
+			if currentAttachment ~= nil then
+				-- For the "Cash" key we just store the numeric cash value, not an object
+				amt = currentAttachment
+			end
+			
+			wndLine:FindChild("CashWindow"):SetAmount(amt, true)
 			if maxLineWidth < 100 then maxLineWidht = 150 end
 		else
 			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", self.wndTooltip, MailAttachmentGrabber)
-			wndLine:FindChild("ItemIcon"):SetSprite(attachment.itemAttached:GetIcon())
+			wndLine:FindChild("ItemIcon"):SetSprite(attachmentBeforeGrab.itemAttached:GetIcon())
 			
-			local str = attachment.itemAttached:GetName() .. " (x" .. attachment.nStackCount .. ")"
+			-- All item attachments may have been grabbed already, so "active" set is empty now
+			local amt = 0
+			if currentAttachment ~= nil then
+				amt = currentAttachment.nStackCount
+			end
+						
+			local str = attachmentBeforeGrab.itemAttached:GetName() .. " (x" .. amt .. ")"
 			wndLine:FindChild("ItemName"):SetText(str)
 			
 			-- Update max line width if this text is the longest added so far
