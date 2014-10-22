@@ -322,7 +322,9 @@ function MailAttachmentGrabber:UpdateTooltip()
 	local maxLineWidth = 0
 	
 	-- Clear out attachment window list
-	self.wndTooltip:DestroyChildren()
+	local wndLines = self.wndTooltip:FindChild("LineWindow")
+	wndLines:DestroyChildren()
+	
 	local attachmentCount = 0
 	
 	local tRemainingAttachments
@@ -342,13 +344,24 @@ function MailAttachmentGrabber:UpdateTooltip()
 		self.wndTooltip:Show(true)
 	end
 	
+	-- Determine mail-count to show in tooltip. Depends on grab-in-progress or not
+	local nPendingMailCount = 0
+	if self.bGrabInProgress then
+		for k,v in pairs(self.tMailsToProcess) do nPendingMailCount = nPendingMailCount+1 end
+	else
+		for k,v in pairs(self.tPendingMails) do nPendingMailCount = nPendingMailCount+1 end
+	end
+	
+	-- Set "mails to process" count message
+	self.wndTooltip:FindChild("MailCountMessage"):SetText(string.format("Mails to process: %d", nPendingMailCount))
+	
 	-- For each of the pending (original) attachments, add a line
 	for key, pendingAttachment in pairs(self.tPendingAttachments) do
 		-- Get current-count from the remainingAttachments set
 		local remainingAttachment = tRemainingAttachments[key]
 		attachmentCount = attachmentCount + 1
 		if key == "Cash" then
-			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", self.wndTooltip, self)
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", wndLines, self)
 			
 			-- All cash attachments may have been grabbed already, so "active" set is empty now
 			local amt = 0
@@ -360,7 +373,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 			wndLine:FindChild("CashWindow"):SetAmount(amt, true)
 			if maxLineWidth < 100 then maxLineWidht = 150 end
 		else
-			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", self.wndTooltip, self)
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", wndLines, self)
 			wndLine:FindChild("ItemIcon"):SetSprite(pendingAttachment.itemAttached:GetIcon())
 			
 			-- All item attachments may have been grabbed already, so "active" set is empty now
@@ -379,7 +392,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 	end
 	
 	-- Sort lines according to type (cash first), then ItemName
-	self.wndTooltip:ArrangeChildrenVert(0, 
+	wndLines:ArrangeChildrenVert(0, 
 		function(a, b)
 			if a:GetName() == "TooltipCashLineForm" then return true end
 			if b:GetName() == "TooltipCashLineForm" then return false end
@@ -387,7 +400,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 		end)
 	
 	-- Resize window width and height. Gief moar magic numbers plox!
-	self.wndTooltip:SetAnchorOffsets(0, 0, maxLineWidth+80, 18+attachmentCount*24)
+	self.wndTooltip:SetAnchorOffsets(0, 0, maxLineWidth+80, 18+28+attachmentCount*24)
 end
 
 
