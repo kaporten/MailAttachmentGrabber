@@ -38,13 +38,9 @@ end
 function MailAttachmentGrabber:OnDocLoaded()
 	local Mail = Apollo.GetAddon("Mail")
 	
-	-- Hook Mail.ToggleWindow so overlay can be loaded / button updated
-	self.mailToggleWindow = Mail.ToggleWindow 
-	Mail.ToggleWindow = self.MailToggleWindowIntercept
-	
-	-- Hook Mail.UpdateAllListItems so button text can be updated on mail select/deselect
-	self.mailUpdateAllListItems = Mail.UpdateAllListItems
-	Mail.UpdateAllListItems = self.MailUpdateAllListItemsIntercept
+	-- Load tooltip form
+	self.wndTooltip = Apollo.LoadForm(self.xmlDoc, "TooltipForm", nil, self)
+	self.wndTooltip:Show(false, true)	
 	
 	-- Load settings form and populate values
 	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
@@ -52,9 +48,13 @@ function MailAttachmentGrabber:OnDocLoaded()
 	self.wndSettings:FindChild("Slider"):SetValue(self.tConfig.nTimer)
 	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Delay (%.1fs):", self.tConfig.nTimer/1000))
 	
-	-- Load tooltip form
-	self.wndTooltip = Apollo.LoadForm(self.xmlDoc, "TooltipForm", nil, self)
-	self.wndTooltip:Show(false, true)
+	-- Hook Mail.ToggleWindow so overlay can be loaded / button updated
+	self.mailToggleWindow = Mail.ToggleWindow 
+	Mail.ToggleWindow = self.MailToggleWindowIntercept
+	
+	-- Hook Mail.UpdateAllListItems so button text can be updated on mail select/deselect
+	self.mailUpdateAllListItems = Mail.UpdateAllListItems
+	Mail.UpdateAllListItems = self.MailUpdateAllListItemsIntercept	
 end
 
 -- Intercept Mail-addons "OnDocumentReady" so that my own overlay can be added to the window
@@ -92,15 +92,111 @@ function MailAttachmentGrabber:MailUpdateAllListItemsIntercept()
 	-- Allow Mail.OnUpdateAllListItemsIntercept to complete as usual
 	MailAttachmentGrabber.mailUpdateAllListItems(Mail)
 
-	-- Update and store list of selected mail IDs and attachment-summary for these mails
-	MailAttachmentGrabber.tSelectedMailMap = MailAttachmentGrabber:GetSelectedMailMap()
-	MailAttachmentGrabber.tEligibleMailMap = MailAttachmentGrabber:GetEligibleMailMap()
-	MailAttachmentGrabber.tAttachmentsMap = MailAttachmentGrabber:GetAttachmentsMap(MailAttachmentGrabber.tEligibleMailMap)
+	-- Only update the eligible/selected/pending lists if grabbing is not in progress.
+	-- While grabbing is in progress, the pending sets will be used as baseline for status 
+	-- updates so these sets must remain static while grabbing is in progress.
+	if not MailAttachmentGrabber.bGrabInProgress then
+		MailAttachmentGrabber.tEligibleMails = MailAttachmentGrabber:GetEligibleMails()
+		MailAttachmentGrabber.tSelectedMails = MailAttachmentGrabber:GetSelectedMails()
+		
+		if next(MailAttachmentGrabber.tSelectedMails) ~= nil then
+			-- Some mails are selected. Calculate tPendingMails as intersection between tEligibleMails and tSelectedMails
+			MailAttachmentGrabber.tPendingMails = {}
+			for id,_ in pairs(MailAttachmentGrabber.tSelectedMails) do
+				if MailAttachmentGrabber.tEligibleMails[id] then
+					MailAttachmentGrabber.tPendingMails[id] = true
+				end
+			end
+		else
+			-- No mails are selected. Set tPendingMails to tEligibleMails
+			MailAttachmentGrabber.tPendingMails = MailAttachmentGrabber.tEligibleMails
+		end
+		
+		-- For list of pending mails, build summary of pending attachments across all mails		
+		MailAttachmentGrabber.tPendingAttachments = MailAttachmentGrabber:GetAttachmentsSummary(MailAttachmentGrabber.tPendingMails)		
+	end	
 
-	
 	-- Update the overlay button text & tooltip
 	MailAttachmentGrabber:UpdateButton()
 	MailAttachmentGrabber:UpdateTooltip()
+end
+
+-- Scans the Mail GUI for selected mail indices. Returns list containing selected mail id-strings.
+-- Empty list returned = no mails are selected
+function MailAttachmentGrabber:GetSelectedMails()	
+	local Mail = Apollo.GetAddon("Mail")
+	local result = {}
+	
+	for idStr, wndMail in pairs(Mail.tMailItemWnds) do
+		if wndMail:FindChild("SelectMarker"):IsChecked() then
+			result[idStr] = true
+		end		
+	end
+	return result
+end
+
+-- Gets total list of all mails which *can* be emptied
+function MailAttachmentGrabber:GetEligibleMails()
+	local result = {}
+	
+	for _,mail in pairs(MailSystemLib.GetInbox()) do
+		local md = self:GetMailDescriptors(mail)
+		
+		if (not md.bIsCOD) and (md.bIsGift or md.bHasAttachments) then
+			result[mail:GetIdStr()] = true
+		end
+	end
+	return result
+end
+
+-- Returns map containing a summary of all current attachments for the specified list of mails
+function MailAttachmentGrabber:GetAttachmentsSummary(tMails)
+	
+	-- Summarized list of attachments
+	local result = {}
+	
+	-- Loop over all mails in the inbox
+	for _,mail in pairs(MailSystemLib.GetInbox()) do
+		-- Should current mail should be included in the attachments summary?
+		if tMails[mail:GetIdStr()] == true then
+			local md = self:GetMailDescriptors(mail)
+			if not md.bIsCOD then
+				if md.bHasAttachments then
+					for _,attachment in pairs(mail:GetMessageInfo().arAttachments) do
+						local itemId = attachment.itemAttached:GetItemId()
+						if result[itemId] ~= nil then
+							-- Attachment type already seen, just add stackcount						
+							result[itemId].nStackCount = result[itemId].nStackCount + attachment.nStackCount
+						else
+							result[itemId] = {
+								itemAttached = attachment.itemAttached,
+								nStackCount = attachment.nStackCount
+							}							
+						end
+					end
+				end
+				
+				-- Add cash summary
+				if md.bIsGift then
+					if type(result["Cash"]) ~= "number" then
+						result["Cash"] = 0 
+					end
+					result["Cash"] = result["Cash"] + mail:GetMessageInfo().monGift:GetAmount()
+				end
+			end
+		end
+	end
+	
+	return result
+end
+
+-- Reusable function for determining basic mail properties without copy/pasta logic everywhere
+function MailAttachmentGrabber:GetMailDescriptors(mail)
+	local descriptors = {}
+	descriptors.bHasAttachments = (mail:GetMessageInfo().arAttachments ~= nil and #mail:GetMessageInfo().arAttachments > 0)
+	descriptors.bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
+	descriptors.bIsGift = not mail:GetMessageInfo().monGift:IsZero()
+	return descriptors
 end
 
 -- Called whenever the button text should be recalculated
@@ -109,119 +205,35 @@ function MailAttachmentGrabber:UpdateButton()
 	if self.wndOverlay == nil then return end	
 	
 	-- Locate overlay button
-	local btn = self.wndOverlay:FindChild("GrabAttachmentsButton")
-		
-	local text 
-	if self.bGrabInProgress then
-		text = ""
-		self.wndOverlay:FindChild("Spinner"):Show(true)
-	else
-		self.wndOverlay:FindChild("Spinner"):Show(false)
+	local button = self.wndOverlay:FindChild("GrabAttachmentsButton")
+	local spinner = self.wndOverlay:FindChild("Spinner")
 	
+	-- Show spinner if grab is in progress
+	
+	-- Set text if grab is not in progress (default text is none/spinner)
+	if self.bGrabInProgress then
+		-- While grabbing is in progress, button should be enabled, no text, spinner shown
+		button:SetText("")
+		button:Enable(true)
+		spinner:Show(true)
+	else
+		-- While grabbing is not in progress, button layout depends on selection/mailbox content
 		-- Default text is "Take All"
-		text = L["TakeAll"]
+		local text = L["TakeAll"]
 		
 		-- If any mails are selected (even if all are selected), update text from "All" to "Selected"
-		if self.tSelectedMailMap ~= nil and next(self.tSelectedMailMap) ~= nil then
+		if self.tSelectedMails ~= nil and next(self.tSelectedMails) ~= nil then
 			text = L["TakeSelected"]
 		end
 		
-		-- Enable or disable, depending on attachments to grab
-		btn:Enable(self.tAttachmentsMap ~= nil and next(self.tAttachmentsMap) ~= nil)		
+		-- Enable or disable button, depending on pending attachments to grab
+		button:SetText(text)
+		button:Enable(self.tPendingAttachments ~= nil and next(self.tPendingAttachments) ~= nil)		
+		spinner:Show(false)
 	end
-	
-	-- Set button text	
-	btn:SetText(text)
 end
 
--- Scans the Mail GUI for selected mail indices. Returns list containing selected mail id-strings.
--- Empty list returned = no mails are selected
-function MailAttachmentGrabber:GetSelectedMailMap()	
-	local Mail = Apollo.GetAddon("Mail")
-	local selectedIds = {}
-	
-	for idStr, wndMail in pairs(Mail.tMailItemWnds) do
-		if wndMail:FindChild("SelectMarker"):IsChecked() then
-			selectedIds[idStr] = true
-		end		
-	end
-	return selectedIds
-end
-
-function MailAttachmentGrabber:GetEligibleMailMap()
-	local result = {}
-	
-	local Mail = Apollo.GetAddon("Mail")	
-	for _,mail in pairs(MailSystemLib.GetInbox()) do
-		if next(self.tSelectedMailMap) == nil or self.tSelectedMailMap[mail:GetIdStr()] == true then
-			-- Mail is selected (or none are selected). Include in eligible-list if it has attachments and is not COD.			
-			local tMsgAttachments = mail:GetMessageInfo().arAttachments
-			local bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
-			local bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
-			local bIsGift = not mail:GetMessageInfo().monGift:IsZero()			
-			
-			if (not bIsCOD) and (bIsGift or bHasAttachments) then
-				-- Store mail id and content summary calculations
-				-- Don't store actual reference to mail object to avoid race conditions with other mail interactions
-				local tEligibleMail = {}
-				tEligibleMail.id = mail:GetIdStr()
-				
-				-- Store shorthands describing mail content
-				local tMsgAttachments = mail:GetMessageInfo().arAttachments
-				tEligibleMail.bHasAttachments = (tMsgAttachments ~= nil and #tMsgAttachments)
-				tEligibleMail.bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
-				tEligibleMail.bIsGift = not mail:GetMessageInfo().monGift:IsZero()
-				
-				result[tEligibleMail.id] = tEligibleMail
-			end
-		end
-	end
-	
-	return result
-end
-
--- Returns true if any of the selected mail-indices has attachments. 
--- If selectedIds input is empty, returns true if ANY mail has attachments.
-function MailAttachmentGrabber:GetAttachmentsMap(tMails)
-	
-	-- List of attachments
-	local result = {}
-	
-	-- Build attachment-summary table for all eligible mails
-	local Mail = Apollo.GetAddon("Mail")	
-	for _,mail in pairs(MailSystemLib.GetInbox()) do
-		local tEligibleMail = tMails[mail:GetIdStr()]
-		if tEligibleMail ~= nil then
-			-- Mail is eligible. Include in summary.
-			-- Add attachments summary 
-			if tEligibleMail.bHasAttachments then
-				for _,msgAttachment in pairs(mail:GetMessageInfo().arAttachments) do
-					local itemId = msgAttachment.itemAttached:GetItemId()
-					if result[itemId] ~= nil then
-						-- Attachment type already seen, just add stackcount						
-						result[itemId].nStackCount = result[itemId].nStackCount + msgAttachment.nStackCount
-					else
-						local newAttachmentType = {}
-						newAttachmentType.itemAttached = msgAttachment.itemAttached
-						newAttachmentType.nStackCount = msgAttachment.nStackCount						
-						result[itemId] = newAttachmentType
-					end
-				end
-			end
-			
-			-- Add cash summary
-			if tEligibleMail.bIsGift then
-				if type(result["Cash"]) ~= "number" then
-					result["Cash"] = 0 
-				end
-				result["Cash"] = result["Cash"] + mail:GetMessageInfo().monGift:GetAmount()
-			end
-		end
-	end
-	
-	return result
-end
-
+-- Button click may initiate grabbing, or set interrupt flag if grabbig is in progress
 function MailAttachmentGrabber:OnGrabAttachmentsBtn()
 	-- Click while grabbing is an interrupt-signal
 	if self.bGrabInProgress then 
@@ -233,20 +245,17 @@ function MailAttachmentGrabber:OnGrabAttachmentsBtn()
 	self.bGrabInProgress = true
 	self.bInterruptGrab = false
 	
-	-- Store snapshots of eligible mails & attachment lists to use as basis for tooltip progress
-	self.tMailsToProcess = {} -- "todo-list" of mails to process. Will be reduced until empty.
-	self.tEligibleMailsSnapshot = {} -- Static snapshot of mails to process
-	self.tAttachmentsSnapshot = {} -- Static snapshot of attachments to process
-	
-	for k,v in pairs(self.tEligibleMailMap) do self.tMailsToProcess[k] = v end
-	for k,v in pairs(self.tEligibleMailMap) do self.tEligibleMailsSnapshot[k] = v end
-	for k,v in pairs(self.tAttachmentsMap) do self.tAttachmentsSnapshot[k] = v end
+	-- Store TODO-list of mails to process - this is just a clone of tPendingMails
+	self.tMailsToProcess = {}	
+	for k,v in pairs(self.tPendingMails) do self.tMailsToProcess[k] = v end
 	
 	-- Call recursive-timer grabber function with a clone of the eligible-mail and attachment maps
-	MailAttachmentGrabber:GrabAttachmentsForMail()
+	MailAttachmentGrabber:Grab()
 end
 
-function MailAttachmentGrabber:GrabAttachmentsForMail()
+-- Main worker function. Grabs attachments for a single mail on the tMailsToProcess list, 
+-- removes it and calls :Grab timer-deferred once more
+function MailAttachmentGrabber:Grab()
 	-- Update mail gui (incl. my overlay buttons/tooltip)
 	self.MailUpdateAllListItemsIntercept()
 	
@@ -264,24 +273,30 @@ function MailAttachmentGrabber:GrabAttachmentsForMail()
 	-- Remove this mail from list of mails to process in next recursion
 	self.tMailsToProcess[id] = nil
 	
-	-- Look through inbox for mail with specified Id
-	local Mail = Apollo.GetAddon("Mail")	
+	-- Loop through inbox for mail with specified Id
+	local Mail = Apollo.GetAddon("Mail")
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		if mail:GetIdStr() == id then
-			-- Mail to grab identified. 			
-			-- Safeguard against COD even though such mails should never be on this list to begin with
-			if mail:GetMessageInfo().monCod:IsZero() then 
-				-- Mark as read and select mail so it can be manually deleted later on
+			-- Mail to grab identified. Get descriptors so we know what to grab
+			local md = self:GetMailDescriptors(mail)
+			
+			-- Additional safeguard against COD even though such mails should never be on this list to begin with
+			if not md.bIsCOD then 
+				-- Mark as read before grabbing stuff
 				mail:MarkAsRead()			
-				Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
 
-				if tEligibleMail.bIsGift then
+				-- Grab money
+				if md.bIsGift then
 					mail:TakeMoney()
 				end
 				
-				if tEligibleMail.bHasAttachments then
+				-- Grab attachments
+				if md.bHasAttachments then
 					mail:TakeAllAttachments()
 				end				
+				
+				-- Select mail for easy (manual) deletion later
+				Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
 			end
 		end
 	end
@@ -292,8 +307,12 @@ function MailAttachmentGrabber:GrabAttachmentsForMail()
 		self.bInterruptGrab = false
 		return 
 	end
-	
-	self.nextMailTimer = ApolloTimer.Create(self.tConfig.nTimer/1000, false, "GrabAttachmentsForMail", self)
+
+	-- Grab next mail via timer. Timer value defaults to 0, but using a "0 ms timer" anyway 
+	-- effectively works as a yield() allowing other threads to do stuff as well.
+	-- This prevents client-freeze while grab is in progress. 
+	-- Divide ms (slider-config) by 1000 to get sec (timer-input). 0/1000 is still just 0 :)
+	self.nextMailTimer = ApolloTimer.Create(self.tConfig.nTimer/1000, false, "Grab", self)
 end
 
 function MailAttachmentGrabber:UpdateTooltip()
@@ -302,58 +321,55 @@ function MailAttachmentGrabber:UpdateTooltip()
 	-- Used to determine width of tooltip window
 	local maxLineWidth = 0
 	
-	-- Add individual item-lines to tooltip
+	-- Clear out attachment window list
 	self.wndTooltip:DestroyChildren()
 	local attachmentCount = 0
 	
-	-- Loop over all *original* attachment types, but get the count from the *current* set, to show a sense of progress on the tooltip
-	-- When grabbing is not in progress, the "master set" is the just-before-grabbing clone
-	local tMasterAttachmentMap, tMasterMailMap
+	local tRemainingAttachments
 	if self.bGrabInProgress then
-		tMasterMailMap = self.tEligibleMailsSnapshot
-		tMasterAttachmentMap = self.tAttachmentsSnapshot		
+		-- While grab is in progress, remaining attachments should be re-summarized off the frozen pending-mail list
+		tRemainingAttachments = self:GetAttachmentsSummary(self.tPendingMails)
 	else
-		tMasterMailMap = self.tEligibleMailMap
-		tMasterAttachmentMap = self.tAttachmentsMap
+		-- While grab is not in progress, remining attachments = pending attachments
+		tRemainingAttachments = self.tPendingAttachments
 	end
 	
 	-- Completely hide tooltip if there is no work to do
-	if next(tMasterAttachmentMap) == nil then
+	if next(tRemainingAttachments) == nil then
 		self.wndTooltip:Show(false)
 		return
 	else
 		self.wndTooltip:Show(true)
 	end
 	
-	-- Get attachments left for the original mail-selection
-	local tCurrentAttachments = self:GetAttachmentsMap(tMasterMailMap)
-	
-	for key,attachmentBeforeGrab in pairs(tMasterAttachmentMap) do
-		local currentAttachment = tCurrentAttachments[key]
+	-- For each of the pending (original) attachments, add a line
+	for key, pendingAttachment in pairs(self.tPendingAttachments) do
+		-- Get current-count from the remainingAttachments set
+		local remainingAttachment = tRemainingAttachments[key]
 		attachmentCount = attachmentCount + 1
 		if key == "Cash" then
-			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", self.wndTooltip, MailAttachmentGrabber)
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipCashLineForm", self.wndTooltip, self)
 			
 			-- All cash attachments may have been grabbed already, so "active" set is empty now
 			local amt = 0
-			if currentAttachment ~= nil then
+			if remainingAttachment ~= nil then
 				-- For the "Cash" key we just store the numeric cash value, not an object
-				amt = currentAttachment
+				amt = remainingAttachment
 			end
 			
 			wndLine:FindChild("CashWindow"):SetAmount(amt, true)
 			if maxLineWidth < 100 then maxLineWidht = 150 end
 		else
-			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", self.wndTooltip, MailAttachmentGrabber)
-			wndLine:FindChild("ItemIcon"):SetSprite(attachmentBeforeGrab.itemAttached:GetIcon())
+			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", self.wndTooltip, self)
+			wndLine:FindChild("ItemIcon"):SetSprite(pendingAttachment.itemAttached:GetIcon())
 			
 			-- All item attachments may have been grabbed already, so "active" set is empty now
 			local amt = 0
-			if currentAttachment ~= nil then
-				amt = currentAttachment.nStackCount
+			if remainingAttachment ~= nil then
+				amt = remainingAttachment.nStackCount
 			end
 						
-			local str = attachmentBeforeGrab.itemAttached:GetName() .. " (x" .. amt .. ")"
+			local str = pendingAttachment.itemAttached:GetName() .. " (x" .. amt .. ")"
 			wndLine:FindChild("ItemName"):SetText(str)
 			
 			-- Update max line width if this text is the longest added so far
@@ -362,7 +378,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 		end
 	end
 	
-	-- Sort lines according to name
+	-- Sort lines according to type (cash first), then ItemName
 	self.wndTooltip:ArrangeChildrenVert(0, 
 		function(a, b)
 			if a:GetName() == "TooltipCashLineForm" then return true end
