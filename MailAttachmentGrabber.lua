@@ -381,12 +381,16 @@ function MailAttachmentGrabber:UpdateTooltip()
 			if remainingAttachment ~= nil then
 				amt = remainingAttachment.nStackCount
 			end
-						
-			local str = pendingAttachment.itemAttached:GetName() .. " (x" .. amt .. ")"
-			wndLine:FindChild("ItemName"):SetText(str)
+
+			-- Fill out text lines. Set name to item-name, and count to remaining/pending
+			local remainingCount = remainingAttachment ~= nil and remainingAttachment.nStackCount or 0
+			local strCount = string.format("%d / %d", remainingCount, pendingAttachment.nStackCount)
+			wndLine:FindChild("ItemName"):SetText(pendingAttachment.itemAttached:GetName())
+			wndLine:FindChild("ItemCount"):SetText(strCount)
 			
 			-- Update max line width if this text is the longest added so far
-			local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", str)		
+			local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemName"):GetText()) + Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemCount"):GetText()) + 10
+			
 			if nCurrLineWidth > maxLineWidth then maxLineWidth = nCurrLineWidth end
 		end
 	end
