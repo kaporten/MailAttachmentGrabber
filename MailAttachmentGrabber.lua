@@ -250,11 +250,23 @@ function MailAttachmentGrabber:OnGrabAttachmentsBtn()
 	self.bGrabInProgress = true
 	self.bInterruptGrab = false
 	
-	-- Store TODO-list of mails to process - this is just a clone of tPendingMails
-	self.tMailsToProcess = {}	
-	for k,v in pairs(self.tPendingMails) do self.tMailsToProcess[k] = v end
+	-- Store TODO-list of mails to process - this is essentially just a clone of tPendingMails, 
+	-- sorted according to visibility in the GUI.
+	self.tMailsToProcess = {}		
+
+	local arMessages = MailSystemLib.GetInbox()
+	table.sort(arMessages, Apollo.GetAddon("Mail").SortMailItems)
+	for _,mail in ipairs(arMessages) do
+		local idStr = mail:GetIdStr()
+		if self.tPendingMails[idStr] == true then
+			self.tMailsToProcess[#self.tMailsToProcess+1] = idStr
+		end
+	end
 	
-	-- Call recursive-timer grabber function with a clone of the eligible-mail and attachment maps
+	-- Reset tMailProcessIdx to 1. This will indicate the next-to-grab index in self.tMailsToProcess recursion
+	self.nMailProcessIdx = 1
+	
+	-- Call recursive-timer grabber function with a clone of the eligible-mail and attachment maps	
 	MailAttachmentGrabber:Grab()
 end
 
@@ -265,18 +277,14 @@ function MailAttachmentGrabber:Grab()
 	self.MailUpdateAllListItemsIntercept()
 	
 	-- Recursion base / interrupt-signal terminates the loop
-	if self.bInterruptGrab or self.tMailsToProcess == nil or next(self.tMailsToProcess) == nil then 
+	if self.bInterruptGrab or self.tMailsToProcess == nil or self.nMailProcessIdx > #self.tMailsToProcess then 
 		self.bGrabInProgress = false
 		self.bInterruptGrab = false
 		return 
 	end
 	
 	-- Get id and data of mail to process
-	local id = next(self.tMailsToProcess)
-	local tEligibleMail = self.tMailsToProcess[id]
-	
-	-- Remove this mail from list of mails to process in next recursion
-	self.tMailsToProcess[id] = nil
+	local id = self.tMailsToProcess[self.nMailProcessIdx]
 	
 	-- Loop through inbox for mail with specified Id
 	local Mail = Apollo.GetAddon("Mail")
@@ -311,12 +319,15 @@ function MailAttachmentGrabber:Grab()
 	end
 
 	-- Recursion base / interrupt-signal terminates the loop
-	if self.bInterruptGrab or self.tMailsToProcess == nil or next(self.tMailsToProcess) == nil then 
+	if self.bInterruptGrab or self.tMailsToProcess == nil or self.nMailProcessIdx > #self.tMailsToProcess then 
 		self.bGrabInProgress = false
 		self.bInterruptGrab = false
 		return 
 	end
 
+	-- Increment self.nMailProcessIdx so next call will process next element in the queue.
+	self.nMailProcessIdx = self.nMailProcessIdx + 1
+	
 	-- Grab next mail via timer. Timer value defaults to 0, but using a "0 ms timer" anyway 
 	-- effectively works as a yield() allowing other threads to do stuff as well.
 	-- This prevents client-freeze while grab is in progress. 
@@ -356,7 +367,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 	-- Determine mail-count to show in tooltip. Depends on grab-in-progress or not
 	local nPendingMailCount = 0
 	if self.bGrabInProgress then
-		for k,v in pairs(self.tMailsToProcess) do nPendingMailCount = nPendingMailCount+1 end
+		nPendingMailCount = #self.tMailsToProcess-self.nMailProcessIdx-1
 	else
 		for k,v in pairs(self.tPendingMails) do nPendingMailCount = nPendingMailCount+1 end
 	end
