@@ -398,7 +398,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 			wndLine:FindChild("ItemCount"):SetText(strCount)
 			
 			-- Update max line width if this text is the longest added so far
-			local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemName"):GetText()) + Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemCount"):GetText()) + 10
+			local nCurrLineWidth = Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemName"):GetText()) + Apollo.GetTextWidth("CRB_InterfaceSmall", wndLine:FindChild("ItemCount"):GetText()) + 15
 			
 			if nCurrLineWidth > maxLineWidth then maxLineWidth = nCurrLineWidth end
 		end
