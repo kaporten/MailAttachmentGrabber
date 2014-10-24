@@ -138,12 +138,17 @@ end
 -- Gets total list of all mails which *can* be emptied
 function MailAttachmentGrabber:GetEligibleMails()
 	local result = {}
+	local Mail = Apollo.GetAddon("Mail")
 	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		local md = self:GetMailDescriptors(mail)
 		
+		-- Mail must have appropriate properties (not COD, contain cash or attachments)
 		if (not md.bIsCOD) and (md.bIsGift or md.bHasAttachments) then
-			result[mail:GetIdStr()] = true
+			-- Mail must be among the 50 visible mails (Mail GUI caps at 50)
+			if Mail.tMailItemWnds[mail:GetIdStr()] ~= nil then
+				result[mail:GetIdStr()] = true
+			end
 		end
 	end
 	return result
@@ -295,8 +300,12 @@ function MailAttachmentGrabber:Grab()
 					mail:TakeAllAttachments()
 				end				
 				
-				-- Select mail for easy (manual) deletion later
-				Mail.tMailItemWnds[mail:GetIdStr()]:FindChild("SelectMarker"):SetCheck(true)
+				-- Select mail for easy (manual) deletion later. Safeguard against mail not being visible anymore.
+				-- Could happen if it gets pushed off the 50-visible limit by incoming mail... perhaps.
+				local wndMail = Mail.tMailItemWnds[mail:GetIdStr()]
+				if wndMail ~= nil then
+					wndMail:FindChild("SelectMarker"):SetCheck(true)
+				end				
 			end
 		end
 	end
