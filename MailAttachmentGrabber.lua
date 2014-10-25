@@ -318,15 +318,17 @@ function MailAttachmentGrabber:Grab()
 		end
 	end
 
-	-- Recursion base / interrupt-signal terminates the loop
+	-- Increment self.nMailProcessIdx so next call will process next element in the queue.
+	self.nMailProcessIdx = self.nMailProcessIdx + 1
+
+	-- Check again if we've reached the end of the grab-loop. 
+	-- Same check as before actual grabbing, except after nMailProcessIdx increment.
+	-- No point in scheduling timer just to discover that we're done already. 
 	if self.bInterruptGrab or self.tMailsToProcess == nil or self.nMailProcessIdx > #self.tMailsToProcess then 
 		self.bGrabInProgress = false
 		self.bInterruptGrab = false
 		return 
 	end
-
-	-- Increment self.nMailProcessIdx so next call will process next element in the queue.
-	self.nMailProcessIdx = self.nMailProcessIdx + 1
 	
 	-- Grab next mail via timer. Timer value defaults to 0, but using a "0 ms timer" anyway 
 	-- effectively works as a yield() allowing other threads to do stuff as well.
@@ -367,8 +369,11 @@ function MailAttachmentGrabber:UpdateTooltip()
 	-- Determine mail-count to show in tooltip. Depends on grab-in-progress or not
 	local nPendingMailCount = 0
 	if self.bGrabInProgress then
-		nPendingMailCount = #self.tMailsToProcess-self.nMailProcessIdx-1
+		-- While grabbing, calculate mails-left as maxIdx-currIdx
+		-- (Add 1 since nMailProcessIdx targets next-in-line, not current)
+		nPendingMailCount = #self.tMailsToProcess-self.nMailProcessIdx+1 
 	else
+		-- While "browsing" just count elements in nPendingMailCount
 		for k,v in pairs(self.tPendingMails) do nPendingMailCount = nPendingMailCount+1 end
 	end
 	
