@@ -75,7 +75,6 @@ function MailAttachmentGrabber:MailToggleWindowIntercept()
 	
 	-- Attach tooltip form
 	MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton"):SetTooltipForm(MailAttachmentGrabber.wndTooltip)
-	MailAttachmentGrabber.wndTooltip:Show(true)	
 	
 	-- Allow Mail.ToggleWindow to complete as usual
 	MailAttachmentGrabber.mailToggleWindow(Mail)
