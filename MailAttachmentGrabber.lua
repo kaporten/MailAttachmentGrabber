@@ -6,6 +6,19 @@ require "Window"
 
 local MailAttachmentGrabber = {}
 local L = Apollo.GetPackage("Gemini:Locale-1.0").tPackage:GetLocale("MailAttachmentGrabber")
+
+-- Copied from the Util addon. Used to set item quality borders on the confirmation dialog
+-- TODO: Figure out how to use list in Util addon itself.
+local qualityColors = {
+	ApolloColor.new("ItemQuality_Inferior"),
+	ApolloColor.new("ItemQuality_Average"),
+	ApolloColor.new("ItemQuality_Good"),
+	ApolloColor.new("ItemQuality_Excellent"),
+	ApolloColor.new("ItemQuality_Superb"),
+	ApolloColor.new("ItemQuality_Legendary"),
+	ApolloColor.new("ItemQuality_Artifact"),
+	ApolloColor.new("00000000")
+}
  
 function MailAttachmentGrabber:new(o)
     o = o or {}
@@ -197,7 +210,7 @@ end
 -- Reusable function for determining basic mail properties without copy/pasta logic everywhere
 function MailAttachmentGrabber:GetMailDescriptors(mail)
 	local descriptors = {}
-	descriptors.bHasAttachments = (mail:GetMessageInfo().arAttachments ~= nil and #mail:GetMessageInfo().arAttachments > 0)
+	descriptors.bHasAttachments = (mail:GetMessageInfo() ~= nil and mail:GetMessageInfo().arAttachments ~= nil and #mail:GetMessageInfo().arAttachments > 0)
 	descriptors.bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
 	descriptors.bIsGift = not mail:GetMessageInfo().monGift:IsZero()
 	return descriptors
@@ -398,7 +411,25 @@ function MailAttachmentGrabber:UpdateTooltip()
 			if maxLineWidth < 100 then maxLineWidht = 150 end
 		else
 			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", wndLines, self)
+			
+			-- Add icon
 			wndLine:FindChild("ItemIcon"):SetSprite(pendingAttachment.itemAttached:GetIcon())
+
+			-- Determine item quality
+			local eQuality = #qualityColors
+			local tItemDetailedInfo = Item.GetDetailedInfo(pendingAttachment.itemAttached)
+			if type(tItemDetailedInfo.tPrimary) == "table" then
+				eQuality = tonumber(tItemDetailedInfo.tPrimary.eQuality)
+			end
+
+			-- Add pixie quality-color border to theicon
+			local tPixieOverlay = {
+				strSprite = "UI_BK3_ItemQualityWhite",
+				loc = {fPoints = {0, 0, 1, 1}, nOffsets = {0, 0, 0, 0}},
+				cr = qualityColors[math.max(1, math.min(eQuality, #qualityColors))]
+			}
+			wndLine:FindChild("ItemIcon"):DestroyAllPixies()
+			wndLine:FindChild("ItemIcon"):AddPixie(tPixieOverlay)
 			
 			-- All item attachments may have been grabbed already, so "active" set is empty now
 			local amt = 0
