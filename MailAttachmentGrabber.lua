@@ -154,14 +154,15 @@ function MailAttachmentGrabber:GetEligibleMails()
 	
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		local md = self:GetMailDescriptors(mail)
-		
-		-- Mail must have appropriate properties (not COD, contain cash or attachments)
-		if (not md.bIsCOD) and (md.bIsGift or md.bHasAttachments) then
-			-- Mail must be among the 50 visible mails (Mail GUI caps at 50)
-			if Mail.tMailItemWnds[mail:GetIdStr()] ~= nil then
-				result[mail:GetIdStr()] = true
+			if md ~= nil then
+			-- Mail must have appropriate properties (not COD, contain cash or attachments)
+			if (not md.bIsCOD) and (md.bIsGift or md.bHasAttachments) then
+				-- Mail must be among the 50 visible mails (Mail GUI caps at 50)
+				if Mail.tMailItemWnds[mail:GetIdStr()] ~= nil then
+					result[mail:GetIdStr()] = true
+				end
 			end
-		end
+		end		
 	end
 	return result
 end
@@ -177,28 +178,30 @@ function MailAttachmentGrabber:GetAttachmentsSummary(tMails)
 		-- Should current mail should be included in the attachments summary?
 		if tMails[mail:GetIdStr()] == true then
 			local md = self:GetMailDescriptors(mail)
-			if not md.bIsCOD then
-				if md.bHasAttachments then
-					for _,attachment in pairs(mail:GetMessageInfo().arAttachments) do
-						local itemId = attachment.itemAttached:GetItemId()
-						if result[itemId] ~= nil then
-							-- Attachment type already seen, just add stackcount						
-							result[itemId].nStackCount = result[itemId].nStackCount + attachment.nStackCount
-						else
-							result[itemId] = {
-								itemAttached = attachment.itemAttached,
-								nStackCount = attachment.nStackCount
-							}							
+			if md ~= nil then
+				if not md.bIsCOD then
+					if md.bHasAttachments then
+						for _,attachment in pairs(mail:GetMessageInfo().arAttachments) do
+							local itemId = attachment.itemAttached:GetItemId()
+							if result[itemId] ~= nil then
+								-- Attachment type already seen, just add stackcount						
+								result[itemId].nStackCount = result[itemId].nStackCount + attachment.nStackCount
+							else
+								result[itemId] = {
+									itemAttached = attachment.itemAttached,
+									nStackCount = attachment.nStackCount
+								}							
+							end
 						end
 					end
-				end
-				
-				-- Add cash summary
-				if md.bIsGift then
-					if type(result["Cash"]) ~= "number" then
-						result["Cash"] = 0 
+					
+					-- Add cash summary
+					if md.bIsGift then
+						if type(result["Cash"]) ~= "number" then
+							result["Cash"] = 0 
+						end
+						result["Cash"] = result["Cash"] + mail:GetMessageInfo().monGift:GetAmount()
 					end
-					result["Cash"] = result["Cash"] + mail:GetMessageInfo().monGift:GetAmount()
 				end
 			end
 		end
@@ -209,8 +212,13 @@ end
 
 -- Reusable function for determining basic mail properties without copy/pasta logic everywhere
 function MailAttachmentGrabber:GetMailDescriptors(mail)
+	-- If called with invalid input (happens from time to time from MailUpdateAllListItems, just return nil
+	if mail == nil or mail:GetMessageInfo() == nil then
+		return
+	end
+	
 	local descriptors = {}
-	descriptors.bHasAttachments = (mail:GetMessageInfo() ~= nil and mail:GetMessageInfo().arAttachments ~= nil and #mail:GetMessageInfo().arAttachments > 0)
+	descriptors.bHasAttachments = (mail:GetMessageInfo().arAttachments ~= nil and #mail:GetMessageInfo().arAttachments > 0)
 	descriptors.bIsCOD = not mail:GetMessageInfo().monCod:IsZero()			
 	descriptors.bIsGift = not mail:GetMessageInfo().monGift:IsZero()
 	return descriptors
@@ -303,29 +311,30 @@ function MailAttachmentGrabber:Grab()
 	for _,mail in pairs(MailSystemLib.GetInbox()) do
 		if mail:GetIdStr() == id then
 			-- Mail to grab identified. Get descriptors so we know what to grab
-			local md = self:GetMailDescriptors(mail)
-			
-			-- Additional safeguard against COD even though such mails should never be on this list to begin with
-			if not md.bIsCOD then 
-				-- Mark as read before grabbing stuff
-				mail:MarkAsRead()			
+			local md = self:GetMailDescriptors(mail)			
+			if md ~= nil then
+				-- Additional safeguard against COD even though such mails should never be on this list to begin with
+				if not md.bIsCOD then 
+					-- Mark as read before grabbing stuff
+					mail:MarkAsRead()			
 
-				-- Grab money
-				if md.bIsGift then
-					mail:TakeMoney()
+					-- Grab money
+					if md.bIsGift then
+						mail:TakeMoney()
+					end
+					
+					-- Grab attachments
+					if md.bHasAttachments then
+						mail:TakeAllAttachments()
+					end				
+					
+					-- Select mail for easy (manual) deletion later. Safeguard against mail not being visible anymore.
+					-- Could happen if it gets pushed off the 50-visible limit by incoming mail... perhaps.
+					local wndMail = Mail.tMailItemWnds[mail:GetIdStr()]
+					if wndMail ~= nil then
+						wndMail:FindChild("SelectMarker"):SetCheck(true)
+					end				
 				end
-				
-				-- Grab attachments
-				if md.bHasAttachments then
-					mail:TakeAllAttachments()
-				end				
-				
-				-- Select mail for easy (manual) deletion later. Safeguard against mail not being visible anymore.
-				-- Could happen if it gets pushed off the 50-visible limit by incoming mail... perhaps.
-				local wndMail = Mail.tMailItemWnds[mail:GetIdStr()]
-				if wndMail ~= nil then
-					wndMail:FindChild("SelectMarker"):SetCheck(true)
-				end				
 			end
 		end
 	end
