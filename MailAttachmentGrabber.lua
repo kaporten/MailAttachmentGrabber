@@ -423,22 +423,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 			
 			-- Add icon
 			wndLine:FindChild("ItemIcon"):SetSprite(pendingAttachment.itemAttached:GetIcon())
-
-			-- Determine item quality
-			local eQuality = #qualityColors
-			local tItemDetailedInfo = Item.GetDetailedInfo(pendingAttachment.itemAttached)
-			if type(tItemDetailedInfo.tPrimary) == "table" then
-				eQuality = tonumber(tItemDetailedInfo.tPrimary.eQuality)
-			end
-
-			-- Add pixie quality-color border to theicon
-			local tPixieOverlay = {
-				strSprite = "UI_BK3_ItemQualityWhite",
-				loc = {fPoints = {0, 0, 1, 1}, nOffsets = {0, 0, 0, 0}},
-				cr = qualityColors[math.max(1, math.min(eQuality, #qualityColors))]
-			}
-			wndLine:FindChild("ItemIcon"):DestroyAllPixies()
-			wndLine:FindChild("ItemIcon"):AddPixie(tPixieOverlay)
+			wndLine:FindChild("ItemIcon"):GetWindowSubclass():SetItem(pendingAttachment.itemAttached)
 			
 			-- All item attachments may have been grabbed already, so "active" set is empty now
 			local amt = 0
