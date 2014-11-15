@@ -6,19 +6,6 @@ require "Window"
 
 local MailAttachmentGrabber = {}
 local L = Apollo.GetPackage("Gemini:Locale-1.0").tPackage:GetLocale("MailAttachmentGrabber")
-
--- Copied from the Util addon. Used to set item quality borders on the confirmation dialog
--- TODO: Figure out how to use list in Util addon itself.
-local qualityColors = {
-	ApolloColor.new("ItemQuality_Inferior"),
-	ApolloColor.new("ItemQuality_Average"),
-	ApolloColor.new("ItemQuality_Good"),
-	ApolloColor.new("ItemQuality_Excellent"),
-	ApolloColor.new("ItemQuality_Superb"),
-	ApolloColor.new("ItemQuality_Legendary"),
-	ApolloColor.new("ItemQuality_Artifact"),
-	ApolloColor.new("00000000")
-}
  
 function MailAttachmentGrabber:new(o)
     o = o or {}
