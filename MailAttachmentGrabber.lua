@@ -347,6 +347,11 @@ end
 
 function MailAttachmentGrabber:UpdateTooltip()
 	if self.wndTooltip == nil then return end
+	if MailAttachmentGrabber.wndOverlay == nil or
+		MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton") == nil or 
+		MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton"):IsMouseTarget() == false then
+		self.wndTooltip:Show(false)
+	end
 	
 	-- Used to determine width of tooltip window
 	local maxLineWidth = 0
