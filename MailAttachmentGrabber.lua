@@ -25,7 +25,8 @@ function MailAttachmentGrabber:Init()
 	-- Prepare default configuration, if none was loaded
 	if self.tConfig == nil then
 		self.tConfig = {}
-		self.tConfig.nTimer = 0 -- ms delay per default
+		self.tConfig.nTimer = 100 -- 100 ms delay per default		
+		self.tConfig.bEnableTooltip = true
 	end
 end
  
@@ -46,7 +47,8 @@ function MailAttachmentGrabber:OnDocLoaded()
 	self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
 	self.wndSettings:Show(false, true)
 	self.wndSettings:FindChild("Slider"):SetValue(self.tConfig.nTimer)
-	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Delay (%.1fs):", self.tConfig.nTimer/1000))
+	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Delay (%.1fs):", self.tConfig.nTimer/1000))	
+	self.wndSettings:FindChild("EnableTooltipBtn"):SetCheck(self.tConfig.bEnableTooltip)
 	
 	-- Hook Mail.ToggleWindow so overlay can be loaded / button updated
 	self.mailToggleWindow = Mail.ToggleWindow 
@@ -346,11 +348,23 @@ function MailAttachmentGrabber:Grab()
 end
 
 function MailAttachmentGrabber:UpdateTooltip()
-	if self.wndTooltip == nil then return end
-	if MailAttachmentGrabber.wndOverlay == nil or
-		MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton") == nil or 
-		MailAttachmentGrabber.wndOverlay:FindChild("GrabAttachmentsButton"):IsMouseTarget() == false then
+	-- If tooltip overlay form is not loaded, do nothing
+	if self.wndTooltip == nil then 
+		return 
+	end
+	
+	-- If tooltip is disabled, ensure it is hidden and return
+	if self.tConfig.bEnableTooltip == false then
 		self.wndTooltip:Show(false)
+		return	
+	end
+	
+	-- If Overlay form IS loaded, but button is not mouse target, just ensure tooltip is hidden and return
+	if self.wndOverlay == nil or
+			self.wndOverlay:FindChild("GrabAttachmentsButton") == nil or 
+			self.wndOverlay:FindChild("GrabAttachmentsButton"):IsMouseTarget() == false then
+		self.wndTooltip:Show(false)
+		return
 	end
 	
 	-- Used to determine width of tooltip window
@@ -371,12 +385,10 @@ function MailAttachmentGrabber:UpdateTooltip()
 		tRemainingAttachments = self.tPendingAttachments
 	end
 	
-	-- Completely hide tooltip if there is no work to do
+	-- Hide tooltip if there is no work to do
 	if next(tRemainingAttachments) == nil then
 		self.wndTooltip:Show(false)
 		return
-	else
-		self.wndTooltip:Show(true)
 	end
 	
 	-- Determine mail-count to show in tooltip. Depends on grab-in-progress or not
@@ -446,6 +458,9 @@ function MailAttachmentGrabber:UpdateTooltip()
 	
 	-- Resize window width and height. Gief moar magic numbers plox!
 	self.wndTooltip:SetAnchorOffsets(0, 0, maxLineWidth+80, 18+28+attachmentCount*24)
+	
+	-- All data added to tooltip, now show the glorious bastard
+	self.wndTooltip:Show(true)
 end
 
 
@@ -473,6 +488,10 @@ end
 function MailAttachmentGrabber:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
 	self.tConfig.nTimer = fNewValue
 	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Delay (%.1fs):", self.tConfig.nTimer/1000))
+end
+
+function MailAttachmentGrabber:EnableTooltipBtnChange(wndHandler, wndControl, eMouseButton)
+	self.tConfig.bEnableTooltip = wndControl:IsChecked()
 end
 
 function MailAttachmentGrabber:OnConfigure()
