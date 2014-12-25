@@ -421,7 +421,7 @@ function MailAttachmentGrabber:UpdateTooltip()
 			end
 			
 			wndLine:FindChild("CashWindow"):SetAmount(amt, true)
-			if maxLineWidth < 100 then maxLineWidht = 150 end
+			if maxLineWidth < 150 then maxLineWidth = 150 end
 		else
 			local wndLine = Apollo.LoadForm(self.xmlDoc, "TooltipItemLineForm", wndLines, self)
 			
